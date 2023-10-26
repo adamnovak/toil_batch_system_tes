@@ -1,0 +1,12 @@
+[project]
+name = "toil_batch_system_tes"
+version = "0.0.1"
+authors = [
+  { name="Adam Novak", email="anovak@soe.ucsc.edu" },
+]
+description = "A TES batch system plugin for Toil"
+readme = "README.md"
+requires-python = ">=3.8"
+classifiers = [
+    "Programming Language :: Python :: 3",
+]

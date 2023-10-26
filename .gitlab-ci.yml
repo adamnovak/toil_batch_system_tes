@@ -1,0 +1,67 @@
+image: quay.io/ucsc_cgl/toil_ci_prebake:latest
+# Note that we must run in a privileged container for our internal Docker daemon to come up.
+
+variables:
+  PYTHONIOENCODING: "utf-8"
+  DEBIAN_FRONTEND: "noninteractive"
+  TOIL_OWNER_TAG: "shared"
+  MAIN_PYTHON_PKG: "python3.11"
+  TEST_THREADS: "3"
+before_script:
+  # Configure Docker to use a mirror for Docker Hub and restart the daemon
+  # Set the registry as insecure because it is probably cluster-internal over plain HTTP.
+  - |
+    if [[ ! -z "${DOCKER_HUB_MIRROR}" ]] ; then
+        echo "{\"registry-mirrors\": [\"${DOCKER_HUB_MIRROR}\"], \"insecure-registries\": [\"${DOCKER_HUB_MIRROR##*://}\"]}" | sudo tee /etc/docker/daemon.json
+    fi
+  # Restart or start the Docker daemon
+  - stopdocker || true
+  - sudo rm -f /var/run/docker.sock
+  - startdocker || true
+  - docker info
+  - mkdir -p ~/.aws && cp "$GITLAB_SECRET_FILE_AWS_CREDENTIALS" ~/.aws/credentials
+
+after_script:
+  # We need to clean up any files that Toil may have made via Docker that
+  # aren't deletable by the Gitlab user. If we don't do this, Gitlab will try
+  # and clean them up before running the next job on the runner, fail, and fail
+  # that next job.
+  - pwd
+  - sudo rm -rf tmp
+  - stopdocker || true
+
+stages:
+  - main_tests
+
+
+batch_systems:
+  stage: main_tests
+  script:
+    - pwd
+    - ${MAIN_PYTHON_PKG} -m virtualenv venv && . venv/bin/activate && pip install -U pip wheel && pip install .
+    - wget https://github.com/ohsu-comp-bio/funnel/releases/download/0.10.1/funnel-linux-amd64-0.10.1.tar.gz
+    - tar -xvf funnel-linux-amd64-0.10.1.tar.gz funnel
+    - export FUNNEL_SERVER_USER=toil
+    - export FUNNEL_SERVER_PASSWORD=$(openssl rand -hex 256)
+    - |
+      cat >funnel.conf <<EOF
+      Server:
+        BasicAuth:
+          - User: ${FUNNEL_SERVER_USER}
+            Password: ${FUNNEL_SERVER_PASSWORD}
+      RPCClient:
+        User: ${FUNNEL_SERVER_USER}
+        Password: ${FUNNEL_SERVER_PASSWORD}
+      LocalStorage:
+        AllowedDirs:
+          - $HOME/.aws
+          - ./
+      Compute: manual
+      EOF
+    - ./funnel server run -c funnel.conf &
+    - ./funnel node run -c funnel.conf &
+    - export TOIL_TES_ENDPOINT="http://127.0.0.1:8000"
+    - export TOIL_TES_USER="${FUNNEL_SERVER_USER}"
+    - export TOIL_TES_PASSWORD="${FUNNEL_SERVER_PASSWORD}"
+    - ${MAIN_PYTHON_PKG} -m pytest --timeout=60 --log-level DEBUG --log-cli-level INFO src/toil_batch_system_tes/test/test.py
+    - kill $(jobs -p) || true
