@@ -10,3 +10,7 @@ requires-python = ">=3.8"
 classifiers = [
     "Programming Language :: Python :: 3",
 ]
+dependencies = [
+    "toil[aws]>5.12",
+    "py-tes>=0.4.2,<1"
+]
