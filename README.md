@@ -1,5 +1,7 @@
 # Toil TES Batch System
 
+Find us on [PyPI](https://pypi.org/project/toil-batch-system-tes)!
+
 This package contains the TES batch system implementation that was removed from
 Toil after version 5.12. It allows the [Toil workflow engine](https://toil.readthedocs.io/en/latest/)
 to run workflows on servers that implement [the GA4GH Task Execution Schemas API](https://github.com/ga4gh/task-execution-schemas).
