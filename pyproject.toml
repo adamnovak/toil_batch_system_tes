@@ -14,3 +14,6 @@ dependencies = [
     "toil[aws]>5.12",
     "py-tes>=0.4.2,<1"
 ]
+
+[project.urls]
+Homepage = "https://github.com/adamnovak/toil_batch_system_tes"
