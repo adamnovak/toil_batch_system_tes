@@ -1,6 +1,8 @@
 # Toil TES Batch System
 
-This package contains the TES batch system implementation that was removed from Toil after version 5.12.
+This package contains the TES batch system implementation that was removed from
+Toil after version 5.12. It allows the [Toil workflow engine](https://toil.readthedocs.io/en/latest/)
+to run workflows on servers that implement [the GA4GH Task Execution Schemas API](https://github.com/ga4gh/task-execution-schemas).
 
 If you intall it, newer versions of Toil will pick up that it is installed, import it, and allow you to use it with `--batchSystem tes`.
 
