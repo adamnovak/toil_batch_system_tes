@@ -24,10 +24,9 @@ import datetime
 import logging
 import math
 import os
-import pickle
 import time
 from argparse import ArgumentParser, _ArgumentGroup
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Dict, List, Optional, Union
 
 import tes
 from requests.exceptions import HTTPError
@@ -45,7 +44,6 @@ from toil.lib.misc import get_public_ip, slow_down, utc_now
 from toil.resource import Resource
 
 logger = logging.getLogger(__name__)
-
 
 # Map from TES terminal states to Toil batch job exit reasons
 STATE_TO_EXIT_REASON: Dict[str, BatchJobExitReason] = {
@@ -152,12 +150,12 @@ class TESBatchSystem(BatchSystemCleanupSupport):
 
     # setEnv is provided by BatchSystemSupport, updates self.environment
 
-    def issueBatchJob(self, job_desc: JobDescription, job_environment: Optional[Dict[str, str]] = None) -> int:
+    def issueBatchJob(self, command: str, job_desc: JobDescription, job_environment: Optional[Dict[str, str]] = None) -> int:
         # TODO: get a sensible self.maxCores, etc. so we can check_resource_request.
         # How do we know if the cluster will autoscale?
 
         # Try the job as local
-        local_id = self.handleLocalJob(job_desc)
+        local_id = self.handleLocalJob(command, job_desc)
         if local_id is not None:
             # It is a local job
             return local_id
@@ -190,15 +188,15 @@ class TESBatchSystem(BatchSystemCleanupSupport):
                 environment['TOIL_WORKDIR'] = '/tmp'
 
             # Make a command to run it in the executor
-            command_list = pack_job(job_desc, self.user_script)
+            command_list = pack_job(command, job_desc, self.user_script)
 
             # Make the sequence of TES containers ("executors") to run.
             # We just run one which is the Toil executor to grab the user
             # script and do the job.
             task_executors = [tes.Executor(image=self.docker_image,
-                command=command_list,
-                env=environment
-            )]
+                                           command=command_list,
+                                           env=environment
+                                           )]
 
             # Prepare inputs.
             task_inputs = list(self.mounts)
@@ -206,8 +204,8 @@ class TESBatchSystem(BatchSystemCleanupSupport):
 
             # Prepare resource requirements
             task_resources = tes.Resources(cpu_cores=math.ceil(job_desc.cores),
-                                           ram_gb=job_desc.memory / (1024**3),
-                                           disk_gb=job_desc.disk / (1024**3),
+                                           ram_gb=job_desc.memory / (1024 ** 3),
+                                           disk_gb=job_desc.disk / (1024 ** 3),
                                            # TODO: py-tes spells this differently than Toil
                                            preemptible=job_desc.preemptible)
 
@@ -248,7 +246,7 @@ class TESBatchSystem(BatchSystemCleanupSupport):
             return None
 
         for log in reversed(task.logs or []):
-             if log.end_time:
+            if log.end_time:
                 # Find the last end time that is set, and override now
                 end_time = log.end_time
                 break
@@ -264,8 +262,8 @@ class TESBatchSystem(BatchSystemCleanupSupport):
         EXIT_STATUS_UNAVAILABLE_VALUE if no executor has a log.
         """
         for task_log in reversed(task.logs or []):
-             for executor_log in reversed(task_log.logs or []):
-                 if isinstance(executor_log.exit_code, int):
+            for executor_log in reversed(task_log.logs or []):
+                if isinstance(executor_log.exit_code, int):
                     # Find the last executor exit code that is a number and return it
                     return executor_log.exit_code
 
@@ -357,7 +355,7 @@ class TESBatchSystem(BatchSystemCleanupSupport):
                 break
             elif result is None:
                 # Wait a bit and poll again
-                time.sleep(min(maxWait/2, 1.0))
+                time.sleep(min(maxWait / 2, 1.0))
 
         # When we get here we have all the result we can get
         return result
@@ -460,4 +458,3 @@ class TESBatchSystem(BatchSystemCleanupSupport):
         setOption("tes_user")
         setOption("tes_password")
         setOption("tes_bearer_token")
-
