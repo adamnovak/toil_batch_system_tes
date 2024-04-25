@@ -7,7 +7,7 @@ def tes_batch_system_factory() -> Type[AbstractBatchSystem]:
     """
     Import and return the TES batch system implementation class.
     """
-    from toil_batch_system_tes.tes_batch_stytem import TESBatchSystem
+    from toil_batch_system_tes.tes_batch_system import TESBatchSystem
     return TESBatchSystem
 
 # Register on import
