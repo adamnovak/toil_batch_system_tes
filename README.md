@@ -10,7 +10,7 @@ If you intall it, newer versions of Toil will pick up that it is installed, impo
 
 ## Installation
 
-1. Create and enter a Python environment with Toil >5.12 installed. Note that as of this writing no release newer than 5.12 exists; you may need to install Toil from source.
+1. Create and enter a Python environment with Toil >=6.2 installed.
 
 2. Clone this repository.
 
