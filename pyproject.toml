@@ -1,6 +1,6 @@
 [project]
 name = "toil_batch_system_tes"
-version = "1.0.0"
+version = "2.0.0"
 authors = [
   { name="Adam Novak", email="anovak@soe.ucsc.edu" },
 ]
@@ -11,7 +11,7 @@ classifiers = [
     "Programming Language :: Python :: 3",
 ]
 dependencies = [
-    "toil[aws]>5.12,<6.2",
+    "toil[aws]>=6.2",
     "py-tes>=0.4.2,<1"
 ]
 
