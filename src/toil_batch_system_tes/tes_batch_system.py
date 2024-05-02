@@ -42,6 +42,7 @@ from toil.common import Config, Toil
 from toil.job import JobDescription
 from toil.lib.misc import get_public_ip, slow_down, utc_now
 from toil.resource import Resource
+from toil.statsAndLogging import set_log_level
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +72,7 @@ class TESBatchSystem(BatchSystemCleanupSupport):
 
     def __init__(self, config: Config, maxCores: float, maxMemory: int, maxDisk: int) -> None:
         super().__init__(config, maxCores, maxMemory, maxDisk)
+        set_log_level(config.logLevel, logger)
         # Connect to TES, using Funnel-compatible environment variables to fill in credentials if not specified.
         tes_endpoint = config.tes_endpoint or self.get_default_tes_endpoint()
         self.tes = tes.HTTPClient(tes_endpoint,
@@ -188,7 +190,7 @@ class TESBatchSystem(BatchSystemCleanupSupport):
                 environment['TOIL_WORKDIR'] = '/tmp'
 
             # Make a command to run it in the executor
-            command_list = pack_job(command, job_desc, self.user_script)
+            command_list = pack_job(command, self.user_script)
 
             # Make the sequence of TES containers ("executors") to run.
             # We just run one which is the Toil executor to grab the user
