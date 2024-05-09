@@ -54,3 +54,18 @@ They can be configured using the following environment variables:
 | TOIL_TES_BEARER_TOKEN            | Token to use to authenticate to the TES server.    |
 +----------------------------------+----------------------------------------------------+
 ```
+
+## Developing the Plugin
+
+When working on this plugin, make sure to update the range of required Toil version when the Toil batch system API changes.
+
+To publish to PyPI, make sure you have an account-scope or project-scope authentication token configured. Then run:
+```
+python3.9 -m virtualenv venv
+. venv/bin/activate
+pip install setuptools wheel build twine
+rm -Rf dist/
+python -m build
+ls dist/
+twine upload dist/*
+```
