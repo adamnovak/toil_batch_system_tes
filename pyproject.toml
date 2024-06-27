@@ -11,7 +11,7 @@ classifiers = [
     "Programming Language :: Python :: 3",
 ]
 dependencies = [
-    "toil[aws]>=7.0",
+    "toil[aws]>=7.0,<8",
     "py-tes>=0.4.2,<1"
 ]
 
