@@ -15,7 +15,8 @@ dependencies = [
     "py-tes>=0.4.2,<1",
     "pytest>=8.2.2,<10",
     "pytest-cov>=2.12.1,<6",
-    "pytest-timeout>=1.4.2,<3"
+    "pytest-timeout>=1.4.2,<3",
+    "pytest-xdist"
 ]
 
 [project.urls]
