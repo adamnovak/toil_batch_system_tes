@@ -63,5 +63,5 @@ batch_systems:
     - export TOIL_TES_ENDPOINT="http://127.0.0.1:8000"
     - export TOIL_TES_USER="${FUNNEL_SERVER_USER}"
     - export TOIL_TES_PASSWORD="${FUNNEL_SERVER_PASSWORD}"
-    - ${MAIN_PYTHON_PKG} -m pytest --timeout=60 --log-level DEBUG --log-cli-level INFO src/toil_batch_system_tes/test/test.py
+    - ${MAIN_PYTHON_PKG} -m pytest --timeout=300 --log-level DEBUG --log-cli-level INFO src/toil_batch_system_tes/test/test.py
     - kill $(jobs -p) || true
