@@ -25,6 +25,8 @@ configure a username and passowrd or a bearer token for authentication (see
 below). You might also need to use the AWS job store, or another job store
 accessible over the network.
 
+This plugin targets TES 1.1 servers and depends on `py-tes>=1.1`.
+
 This plugin adds the following options to Toil:
 
 ```

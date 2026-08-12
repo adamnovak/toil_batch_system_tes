@@ -70,15 +70,39 @@ class TESBatchSystem(BatchSystemCleanupSupport):
         """
         return f'http://{get_public_ip()}:8000'
 
+    @staticmethod
+    def _normalize_tes_endpoint(endpoint: str) -> str:
+        """Normalize TES endpoint inputs to a server base URL."""
+        normalized = endpoint.rstrip('/')
+        suffixes = [
+            '/ga4gh/tes/v1/tasks', '/ga4gh/tes/v1', '/ga4gh/tes',
+            '/v1/tasks', '/v1',
+        ]
+        changed = True
+        while changed:
+            changed = False
+            for suffix in suffixes:
+                if normalized.endswith(suffix):
+                    normalized = normalized[:-len(suffix)].rstrip('/')
+                    changed = True
+        return normalized
+
     def __init__(self, config: Config, maxCores: float, maxMemory: int, maxDisk: int) -> None:
         super().__init__(config, maxCores, maxMemory, maxDisk)
         set_log_level(config.logLevel, logger)
         # Connect to TES, using Funnel-compatible environment variables to fill in credentials if not specified.
-        tes_endpoint = config.tes_endpoint or self.get_default_tes_endpoint()
+        tes_endpoint = self._normalize_tes_endpoint(
+            config.tes_endpoint or self.get_default_tes_endpoint()
+        )
         self.tes = tes.HTTPClient(tes_endpoint,
-                                  user=config.tes_user,
-                                  password=config.tes_password,
-                                  token=config.tes_bearer_token)
+                      user=config.tes_user,
+                      password=config.tes_password,
+                      token=config.tes_bearer_token)
+
+        # Funnel returns 400 (not 404) for /ga4gh/tes/v1/tasks, so py-tes
+        # fallback does not continue. Force /v1-first URL order.
+        if hasattr(self.tes, 'urls'):
+            self.tes.urls = [f'{tes_endpoint}/v1', tes_endpoint]
 
         # Get service info from the TES server and pull out supported storages.
         # We need this so we can tell if the server is likely to be able to
@@ -95,7 +119,14 @@ class TESBatchSystem(BatchSystemCleanupSupport):
             job_store_type, job_store_path = Toil.parseLocator(config.jobStore)
             if job_store_type == 'file':
                 # If we have a file job store, we want to mount it at the same path, if we can
+                mounts_before = len(self.mounts)
                 self._mount_local_path_if_possible(job_store_path, job_store_path)
+                if len(self.mounts) == mounts_before:
+                    raise RuntimeError(
+                        'TES file job store is not mountable by the server: '
+                        f'{job_store_path}. Use a TES-accessible shared path '
+                        '(file://...) or a non-file job store backend.'
+                    )
 
         # If we have AWS credentials, we want to mount them in our home directory if we can.
         aws_credentials_path = os.path.join(os.path.expanduser("~"), '.aws')
@@ -218,7 +249,18 @@ class TESBatchSystem(BatchSystemCleanupSupport):
                             resources=task_resources)
 
             # Launch it and get back the TES ID that we can use to poll the task
-            tes_id = self.tes.create_task(task)
+            try:
+                tes_id = self.tes.create_task(task)
+            except HTTPError as exc:
+                response = getattr(exc, 'response', None)
+                if response is not None:
+                    logger.error(
+                        'TES create_task failed: status=%s url=%s body=%s',
+                        response.status_code,
+                        response.url,
+                        response.text,
+                    )
+                raise
 
             # Tie it to the numeric ID
             self.bs_id_to_tes_id[bs_id] = tes_id
