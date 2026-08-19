@@ -72,24 +72,33 @@ class TESBatchSystem(BatchSystemCleanupSupport):
 
     @staticmethod
     def _normalize_tes_endpoint(endpoint: str) -> str:
-        """Normalize TES endpoint inputs to a server base URL."""
+        """Normalize TES endpoint inputs to a TES server base URL.
+
+        Preserve mounted paths like /ga4gh/tes, and only trim API leaf
+        segments (e.g. /v1 or /v1/tasks).
+        """
         normalized = endpoint.rstrip('/')
-        suffixes = [
-            '/ga4gh/tes/v1/tasks', '/ga4gh/tes/v1', '/ga4gh/tes',
-            '/v1/tasks', '/v1',
-        ]
-        changed = True
-        while changed:
-            changed = False
-            for suffix in suffixes:
-                if normalized.endswith(suffix):
-                    normalized = normalized[:-len(suffix)].rstrip('/')
-                    changed = True
-        return normalized
+
+        # Keep mounted GA4GH TES base path when present.
+        if normalized.endswith('/ga4gh/tes/v1/tasks'):
+            return normalized[:-len('/v1/tasks')].rstrip('/')
+        if normalized.endswith('/ga4gh/tes/v1'):
+            return normalized[:-len('/v1')].rstrip('/')
+        if normalized.endswith('/ga4gh/tes'):
+            return normalized
+
+        # Root-mounted TES: trim leaf API suffixes to server base.
+        if normalized.endswith('/v1/tasks'):
+            normalized = normalized[:-len('/v1/tasks')]
+        elif normalized.endswith('/v1'):
+            normalized = normalized[:-len('/v1')]
+
+        return normalized.rstrip('/')
 
     def __init__(self, config: Config, maxCores: float, maxMemory: int, maxDisk: int) -> None:
         super().__init__(config, maxCores, maxMemory, maxDisk)
         set_log_level(config.logLevel, logger)
+        self.skip_storage_check = os.getenv('TOIL_TES_SKIP_STORAGE_CHECK', '0') == '1'
         # Connect to TES, using Funnel-compatible environment variables to fill in credentials if not specified.
         tes_endpoint = self._normalize_tes_endpoint(
             config.tes_endpoint or self.get_default_tes_endpoint()
@@ -121,7 +130,7 @@ class TESBatchSystem(BatchSystemCleanupSupport):
                 # If we have a file job store, we want to mount it at the same path, if we can
                 mounts_before = len(self.mounts)
                 self._mount_local_path_if_possible(job_store_path, job_store_path)
-                if len(self.mounts) == mounts_before:
+                if len(self.mounts) == mounts_before and not self.skip_storage_check:
                     raise RuntimeError(
                         'TES file job store is not mountable by the server: '
                         f'{job_store_path}. Use a TES-accessible shared path '
@@ -171,7 +180,7 @@ class TESBatchSystem(BatchSystemCleanupSupport):
         # TODO: We aren't going to work well with linked imports if we're mounting the job store into the container...
 
         path_url = 'file://' + os.path.abspath(local_path)
-        if os.path.exists(local_path) and self._server_can_mount(path_url):
+        if os.path.exists(local_path) and (self.skip_storage_check or self._server_can_mount(path_url)):
             # We can access this file from the server. Probably.
             self.mounts.append(tes.Input(url=path_url,
                                          path=container_path,
