@@ -26,7 +26,7 @@ import math
 import os
 import time
 from argparse import ArgumentParser, _ArgumentGroup
-from typing import Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 import tes
 from requests.exceptions import HTTPError
@@ -343,6 +343,64 @@ class TESBatchSystem(BatchSystemCleanupSupport):
         # If we get here we couldn't find a log.
         return None
 
+    @staticmethod
+    def _shorten_for_log(value: Any, limit: int = 300) -> str:
+        """Convert a value to text and cap size for readable diagnostics."""
+        text = str(value)
+        if len(text) <= limit:
+            return text
+        return text[: limit - 3] + '...'
+
+    @staticmethod
+    def _get_last_executor_log(task: tes.Task) -> Optional[Any]:
+        """Get the last executor log object from a TES task, if present."""
+        for task_log in reversed(task.logs or []):
+            for executor_log in reversed(task_log.logs or []):
+                return executor_log
+        return None
+
+    @classmethod
+    def _format_failure_diagnostics(cls, tes_id: str, task: tes.Task) -> str:
+        """Build fallback TES diagnostics for failures without executor logs."""
+        parts = [
+            f'task_id={tes_id}',
+            f'final_state={getattr(task, "state", "UNKNOWN")}',
+        ]
+
+        executor_log = cls._get_last_executor_log(task)
+        if executor_log is not None:
+            exit_code = getattr(executor_log, 'exit_code', None)
+            if exit_code is not None:
+                parts.append(f'executor_exit_code={exit_code}')
+
+            for field in ('state', 'reason', 'message', 'error'):
+                value = getattr(executor_log, field, None)
+                if value:
+                    parts.append(f'executor_{field}={cls._shorten_for_log(value)}')
+
+            stderr = getattr(executor_log, 'stderr', None)
+            stdout = getattr(executor_log, 'stdout', None)
+            if isinstance(stderr, str) and stderr.strip():
+                parts.append(f'stderr={cls._shorten_for_log(stderr)}')
+            if isinstance(stdout, str) and stdout.strip():
+                parts.append(f'stdout={cls._shorten_for_log(stdout)}')
+        else:
+            parts.append('executor_log=missing')
+
+        task_logs = task.logs or []
+        if task_logs:
+            system_logs = getattr(task_logs[-1], 'system_logs', None)
+            if system_logs:
+                parts.append(f'system_logs={cls._shorten_for_log(system_logs)}')
+
+        parts.append(f'tes_view_excerpt={cls._shorten_for_log(task)}')
+        parts.append(
+            'next_steps=Run TES get_task(view=FULL) for this task_id and inspect backend pod/container status '
+            '(for Kubernetes: kubectl describe pod <task-pod> and kubectl logs <task-pod> --all-containers).'
+        )
+
+        return '; '.join(parts)
+
     def getUpdatedBatchJob(self, maxWait: int) -> Optional[UpdatedBatchJobInfo]:
         # Remember when we started, for respecting the timeout
         entry = datetime.datetime.now()
@@ -388,9 +446,11 @@ class TESBatchSystem(BatchSystemCleanupSupport):
                     # Get its exit code
                     exit_code = self._get_exit_code(task)
 
-                    if task.state == "EXECUTOR_ERROR":
-                        # The task failed, so report executor logs.
-                        logger.warning('Log from failed executor: %s', self.__get_log_text(task))
+                    if task.state in ["EXECUTOR_ERROR", "SYSTEM_ERROR"]:
+                        # Log stderr when present, and always include fallback context.
+                        log_text = self.__get_log_text(task)
+                        logger.warning('Log from failed executor: %s', log_text if log_text is not None else '<missing>')
+                        logger.warning('TES failure diagnostics: %s', self._format_failure_diagnostics(tes_id, task))
 
                     # Compose a result
                     result = UpdatedBatchJobInfo(jobID=bs_id, exitStatus=exit_code, wallTime=runtime, exitReason=exit_reason)
