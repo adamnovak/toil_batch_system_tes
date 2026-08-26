@@ -50,8 +50,9 @@ batch_systems:
           - User: ${FUNNEL_SERVER_USER}
             Password: ${FUNNEL_SERVER_PASSWORD}
       RPCClient:
-        User: ${FUNNEL_SERVER_USER}
-        Password: ${FUNNEL_SERVER_PASSWORD}
+        Credential:
+          User: ${FUNNEL_SERVER_USER}
+          Password: ${FUNNEL_SERVER_PASSWORD}
       LocalStorage:
         AllowedDirs:
           - $HOME/.aws
