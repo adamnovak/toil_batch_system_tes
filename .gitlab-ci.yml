@@ -59,6 +59,9 @@ batch_systems:
       Compute: manual
       EOF
     - ./funnel server run -c funnel.conf &
+    - SERVER_PID=$!
+    - sleep 3
+    - if ! kill -0 ${SERVER_PID} ; then echo "Funnel did not start!" ; exit 1 ; fi
     - ./funnel node run -c funnel.conf &
     - export TOIL_TES_ENDPOINT="http://127.0.0.1:8000"
     - export TOIL_TES_USER="${FUNNEL_SERVER_USER}"
