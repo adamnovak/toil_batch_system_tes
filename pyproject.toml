@@ -11,8 +11,8 @@ classifiers = [
     "Programming Language :: Python :: 3",
 ]
 dependencies = [
-    "toil[aws]>=7.0,<8",
-  "py-tes>=1.1,<2",
+    "toil[aws]>=9.5.0,<10",
+    "py-tes>=1.1,<2",
     "pytest>=8.2.2,<10",
     "pytest-cov>=2.12.1,<6",
     "pytest-timeout>=1.4.2,<3",

@@ -58,6 +58,9 @@ batch_systems:
           - $HOME/.aws
           - ./
       Compute: manual
+      Node:
+        Timeout:
+          duration: -1s
       EOF
     - ./funnel server run -c funnel.conf &
     - SERVER_PID=$!
