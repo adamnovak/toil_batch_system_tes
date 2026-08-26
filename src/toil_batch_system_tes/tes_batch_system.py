@@ -254,6 +254,10 @@ class TESBatchSystem(BatchSystemCleanupSupport):
             # Package into a TES Task
             task = tes.Task(name=job_name,
                             executors=task_executors,
+                            # TODO: We need to ask for a writable /tmp
+                            # explicitly until
+                            # https://github.com/calypr/funnel/issues/1449 is
+                            # fixed.
                             volumes=["/tmp"],
                             inputs=task_inputs,
                             resources=task_resources)
