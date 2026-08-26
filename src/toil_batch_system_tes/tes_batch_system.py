@@ -254,6 +254,7 @@ class TESBatchSystem(BatchSystemCleanupSupport):
             # Package into a TES Task
             task = tes.Task(name=job_name,
                             executors=task_executors,
+                            volumes=["/tmp"],
                             inputs=task_inputs,
                             resources=task_resources)
 
