@@ -75,25 +75,16 @@ class TESBatchSystem(BatchSystemCleanupSupport):
         """Normalize TES endpoint inputs to a TES server base URL.
 
         Preserve mounted paths like /ga4gh/tes, and only trim API leaf
-        segments (e.g. /v1 or /v1/tasks).
+        segments (/v1 or /v1/tasks).
         """
         normalized = endpoint.rstrip('/')
 
-        # Keep mounted GA4GH TES base path when present.
-        if normalized.endswith('/ga4gh/tes/v1/tasks'):
-            return normalized[:-len('/v1/tasks')].rstrip('/')
-        if normalized.endswith('/ga4gh/tes/v1'):
-            return normalized[:-len('/v1')].rstrip('/')
-        if normalized.endswith('/ga4gh/tes'):
-            return normalized
-
-        # Root-mounted TES: trim leaf API suffixes to server base.
         if normalized.endswith('/v1/tasks'):
             normalized = normalized[:-len('/v1/tasks')]
         elif normalized.endswith('/v1'):
             normalized = normalized[:-len('/v1')]
 
-        return normalized.rstrip('/')
+        return normalized
 
     def __init__(self, config: Config, maxCores: float, maxMemory: int, maxDisk: int) -> None:
         super().__init__(config, maxCores, maxMemory, maxDisk)
