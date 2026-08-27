@@ -25,6 +25,22 @@ configure a username and passowrd or a bearer token for authentication (see
 below). You might also need to use the AWS job store, or another job store
 accessible over the network.
 
+This plugin targets TES 1.1 servers and depends on `py-tes>=1.1`.
+
+## Kubernetes shared `file:/` jobstore caveat
+
+When using a shared filesystem job store (for example `--jobStore file:/shared/toil-jobstore`) on Kubernetes, jobs can fail even when TES endpoint configuration is correct.
+
+The most common cause is UID/GID mismatch between the process writing the job store (often the Toil driver) and the process reading/writing it in TES task pods. This can present as runtime failures with missing executor logs, permission denied errors, or cleanup failures.
+
+Potential mitigations:
+
+- Run driver and task pods with compatible identity (`runAsUser`/`runAsGroup`).
+- Use `fsGroup` so shared volume contents are group-accessible.
+- If needed, pre-create/chown the shared directory to the runtime UID/GID before invoking Toil.
+- For smoke tests, consider `--clean never` and perform cleanup separately with a compatible identity.
+- For production, prefer network/object-backed job stores when feasible to avoid shared filesystem ownership coupling.
+
 This plugin adds the following options to Toil:
 
 ```
@@ -52,6 +68,10 @@ They can be configured using the following environment variables:
 |                                  | log into the TES server.                           |
 +----------------------------------+----------------------------------------------------+
 | TOIL_TES_BEARER_TOKEN            | Token to use to authenticate to the TES server.    |
++----------------------------------+----------------------------------------------------+
+| TOIL_TES_SKIP_STORAGE_CHECK      | Set to `1` to skip server storage mountability     |
+|                                  | pre-checks. Use with caution: invalid mounts may   |
+|                                  | fail later at runtime instead of at startup.       |
 +----------------------------------+----------------------------------------------------+
 ```
 

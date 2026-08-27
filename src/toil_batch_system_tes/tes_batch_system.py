@@ -26,7 +26,7 @@ import math
 import os
 import time
 from argparse import ArgumentParser, _ArgumentGroup
-from typing import Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 import tes
 from requests.exceptions import HTTPError
@@ -70,15 +70,39 @@ class TESBatchSystem(BatchSystemCleanupSupport):
         """
         return f'http://{get_public_ip()}:8000'
 
+    @staticmethod
+    def _normalize_tes_endpoint(endpoint: str) -> str:
+        """Normalize TES endpoint inputs to a TES server base URL.
+
+        Preserve mounted paths like /ga4gh/tes, and only trim API leaf
+        segments (/v1 or /v1/tasks).
+        """
+        normalized = endpoint.rstrip('/')
+
+        if normalized.endswith('/v1/tasks'):
+            normalized = normalized[:-len('/v1/tasks')]
+        elif normalized.endswith('/v1'):
+            normalized = normalized[:-len('/v1')]
+
+        return normalized
+
     def __init__(self, config: Config, maxCores: float, maxMemory: int, maxDisk: int) -> None:
         super().__init__(config, maxCores, maxMemory, maxDisk)
         set_log_level(config.logLevel, logger)
+        self.skip_storage_check = os.getenv('TOIL_TES_SKIP_STORAGE_CHECK', '0') == '1'
         # Connect to TES, using Funnel-compatible environment variables to fill in credentials if not specified.
-        tes_endpoint = config.tes_endpoint or self.get_default_tes_endpoint()
+        tes_endpoint = self._normalize_tes_endpoint(
+            config.tes_endpoint or self.get_default_tes_endpoint()
+        )
         self.tes = tes.HTTPClient(tes_endpoint,
-                                  user=config.tes_user,
-                                  password=config.tes_password,
-                                  token=config.tes_bearer_token)
+                      user=config.tes_user,
+                      password=config.tes_password,
+                      token=config.tes_bearer_token)
+
+        # Funnel returns 400 (not 404) for /ga4gh/tes/v1/tasks, so py-tes
+        # fallback does not continue. Force /v1-first URL order.
+        if hasattr(self.tes, 'urls'):
+            self.tes.urls = [f'{tes_endpoint}/v1', tes_endpoint]
 
         # Get service info from the TES server and pull out supported storages.
         # We need this so we can tell if the server is likely to be able to
@@ -95,7 +119,14 @@ class TESBatchSystem(BatchSystemCleanupSupport):
             job_store_type, job_store_path = Toil.parseLocator(config.jobStore)
             if job_store_type == 'file':
                 # If we have a file job store, we want to mount it at the same path, if we can
+                mounts_before = len(self.mounts)
                 self._mount_local_path_if_possible(job_store_path, job_store_path)
+                if len(self.mounts) == mounts_before and not self.skip_storage_check:
+                    raise RuntimeError(
+                        'TES file job store is not mountable by the server: '
+                        f'{job_store_path}. Use a TES-accessible shared path '
+                        '(file://...) or a non-file job store backend.'
+                    )
 
         # If we have AWS credentials, we want to mount them in our home directory if we can.
         aws_credentials_path = os.path.join(os.path.expanduser("~"), '.aws')
@@ -140,7 +171,7 @@ class TESBatchSystem(BatchSystemCleanupSupport):
         # TODO: We aren't going to work well with linked imports if we're mounting the job store into the container...
 
         path_url = 'file://' + os.path.abspath(local_path)
-        if os.path.exists(local_path) and self._server_can_mount(path_url):
+        if os.path.exists(local_path) and (self.skip_storage_check or self._server_can_mount(path_url)):
             # We can access this file from the server. Probably.
             self.mounts.append(tes.Input(url=path_url,
                                          path=container_path,
@@ -214,11 +245,27 @@ class TESBatchSystem(BatchSystemCleanupSupport):
             # Package into a TES Task
             task = tes.Task(name=job_name,
                             executors=task_executors,
+                            # TODO: We need to ask for a writable /tmp
+                            # explicitly until
+                            # https://github.com/calypr/funnel/issues/1449 is
+                            # fixed.
+                            volumes=["/tmp"],
                             inputs=task_inputs,
                             resources=task_resources)
 
             # Launch it and get back the TES ID that we can use to poll the task
-            tes_id = self.tes.create_task(task)
+            try:
+                tes_id = self.tes.create_task(task)
+            except HTTPError as exc:
+                response = getattr(exc, 'response', None)
+                if response is not None:
+                    logger.error(
+                        'TES create_task failed: status=%s url=%s body=%s',
+                        response.status_code,
+                        response.url,
+                        response.text,
+                    )
+                raise
 
             # Tie it to the numeric ID
             self.bs_id_to_tes_id[bs_id] = tes_id
@@ -292,6 +339,64 @@ class TESBatchSystem(BatchSystemCleanupSupport):
         # If we get here we couldn't find a log.
         return None
 
+    @staticmethod
+    def _shorten_for_log(value: Any, limit: int = 300) -> str:
+        """Convert a value to text and cap size for readable diagnostics."""
+        text = str(value)
+        if len(text) <= limit:
+            return text
+        return text[: limit - 3] + '...'
+
+    @staticmethod
+    def _get_last_executor_log(task: tes.Task) -> Optional[Any]:
+        """Get the last executor log object from a TES task, if present."""
+        for task_log in reversed(task.logs or []):
+            for executor_log in reversed(task_log.logs or []):
+                return executor_log
+        return None
+
+    @classmethod
+    def _format_failure_diagnostics(cls, tes_id: str, task: tes.Task) -> str:
+        """Build fallback TES diagnostics for failures without executor logs."""
+        parts = [
+            f'task_id={tes_id}',
+            f'final_state={getattr(task, "state", "UNKNOWN")}',
+        ]
+
+        executor_log = cls._get_last_executor_log(task)
+        if executor_log is not None:
+            exit_code = getattr(executor_log, 'exit_code', None)
+            if exit_code is not None:
+                parts.append(f'executor_exit_code={exit_code}')
+
+            for field in ('state', 'reason', 'message', 'error'):
+                value = getattr(executor_log, field, None)
+                if value:
+                    parts.append(f'executor_{field}={cls._shorten_for_log(value)}')
+
+            stderr = getattr(executor_log, 'stderr', None)
+            stdout = getattr(executor_log, 'stdout', None)
+            if isinstance(stderr, str) and stderr.strip():
+                parts.append(f'stderr={cls._shorten_for_log(stderr)}')
+            if isinstance(stdout, str) and stdout.strip():
+                parts.append(f'stdout={cls._shorten_for_log(stdout)}')
+        else:
+            parts.append('executor_log=missing')
+
+        task_logs = task.logs or []
+        if task_logs:
+            system_logs = getattr(task_logs[-1], 'system_logs', None)
+            if system_logs:
+                parts.append(f'system_logs={cls._shorten_for_log(system_logs)}')
+
+        parts.append(f'tes_view_excerpt={cls._shorten_for_log(task)}')
+        parts.append(
+            'next_steps=Run TES get_task(view=FULL) for this task_id and inspect backend pod/container status '
+            '(for Kubernetes: kubectl describe pod <task-pod> and kubectl logs <task-pod> --all-containers).'
+        )
+
+        return '; '.join(parts)
+
     def getUpdatedBatchJob(self, maxWait: int) -> Optional[UpdatedBatchJobInfo]:
         # Remember when we started, for respecting the timeout
         entry = datetime.datetime.now()
@@ -337,9 +442,11 @@ class TESBatchSystem(BatchSystemCleanupSupport):
                     # Get its exit code
                     exit_code = self._get_exit_code(task)
 
-                    if task.state == "EXECUTOR_ERROR":
-                        # The task failed, so report executor logs.
-                        logger.warning('Log from failed executor: %s', self.__get_log_text(task))
+                    if task.state in ["EXECUTOR_ERROR", "SYSTEM_ERROR"]:
+                        # Log stderr when present, and always include fallback context.
+                        log_text = self.__get_log_text(task)
+                        logger.warning('Log from failed executor: %s', log_text if log_text is not None else '<missing>')
+                        logger.warning('TES failure diagnostics: %s', self._format_failure_diagnostics(tes_id, task))
 
                     # Compose a result
                     result = UpdatedBatchJobInfo(jobID=bs_id, exitStatus=exit_code, wallTime=runtime, exitReason=exit_reason)
